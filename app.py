@@ -106,26 +106,56 @@ def buscar_votacoes_senador(codigo_senador, ano=None):
         return []
 
 def buscar_presencas_senador(codigo_senador, ano=None):
-    """Busca presenças do senador nas sessões plenárias."""
-    url = f"{BASE}/senador/{codigo_senador}/presencas.json"
-    params = {}
-    if ano:
-        params["ano"] = ano
-    data = get_json(url, params=params)
-    if not data:
-        return []
+    """
+    O Senado não tem endpoint de presença direta.
+    Usamos as votações nominais do ano para contar sessões em que o senador participou.
+    Também buscamos o total de sessões plenárias do ano para calcular ausências.
+    """
+    # Busca votações do senador no ano para extrair sessões em que participou
+    votacoes = buscar_votacoes_senador(codigo_senador, ano)
+
+    # Conta sessões únicas em que o senador votou (=presente)
+    sessoes_com_voto = set()
+    for v in votacoes:
+        sessao_id = v.get('codigo_sessao') or v.get('numero_sessao') or v.get('data')
+        if sessao_id:
+            sessoes_com_voto.add(str(sessao_id))
+
+    # Busca total de sessões plenárias do ano via API de plenário
+    total_sessoes = 0
     try:
-        presencas_raw = (data
-            .get("PresencaParlamentar", {})
-            .get("Parlamentar", {})
-            .get("Presencas", {})
-            .get("Sessao", []))
-        if isinstance(presencas_raw, dict):
-            presencas_raw = [presencas_raw]
-        return presencas_raw or []
+        if ano:
+            url = f"{BASE}/plenario/lista/votacao/{ano}.json"
+            data = get_json(url)
+            if data:
+                votacoes_ano = (data
+                    .get("ListaVotacoes", {})
+                    .get("Votacoes", {})
+                    .get("Votacao", []))
+                if isinstance(votacoes_ano, dict):
+                    votacoes_ano = [votacoes_ano]
+                # Conta sessões únicas do ano
+                sessoes_ano = set()
+                for v in votacoes_ano:
+                    s = v.get("SessaoPlenaria", {}) or {}
+                    sid = s.get("CodigoSessao") or s.get("NumeroSessao")
+                    if sid:
+                        sessoes_ano.add(str(sid))
+                total_sessoes = len(sessoes_ano)
     except Exception as e:
-        logger.error(f"Erro ao parsear presenças de {codigo_senador}: {e}")
-        return []
+        logger.warning(f"Erro ao buscar total de sessões {ano}: {e}")
+        total_sessoes = 0
+
+    presente   = len(sessoes_com_voto)
+    ausente    = max(0, total_sessoes - presente)
+
+    return {
+        'total':        total_sessoes,
+        'presente':     presente,
+        'ausente':      ausente,
+        'justificado':  0,  # API não fornece esse dado separado
+        'pct_presenca': round(presente / total_sessoes * 100, 1) if total_sessoes > 0 else 0
+    }
 
 # --------------------------------------------------------------------------
 # ROTAS
@@ -162,30 +192,17 @@ def api_relatorio():
         votos_abs      = sum(1 for v in votacoes if 'abs' in v['voto'].lower())
         votos_outros   = total_votacoes - votos_sim - votos_nao - votos_abs
 
-        total_presencas    = len(presencas)
-        presencas_present  = sum(1 for p in presencas if 'presente' in str(p.get('DescricaoFrequencia', '')).lower())
-        presencas_ausente  = sum(1 for p in presencas if 'ausente' in str(p.get('DescricaoFrequencia', '')).lower())
-        presencas_justif   = sum(1 for p in presencas if 'justif' in str(p.get('DescricaoFrequencia', '')).lower())
-
-        pct_presenca = round(presencas_present / total_presencas * 100, 1) if total_presencas > 0 else 0
-
         resultado.append({
-            'codigo':          cod,
+            'codigo': cod,
             'votacoes': {
-                'total':       total_votacoes,
-                'sim':         votos_sim,
-                'nao':         votos_nao,
-                'abstencao':   votos_abs,
-                'outros':      votos_outros,
-                'detalhes':    votacoes[:50]  # Limita para performance
+                'total':     total_votacoes,
+                'sim':       votos_sim,
+                'nao':       votos_nao,
+                'abstencao': votos_abs,
+                'outros':    votos_outros,
+                'detalhes':  votacoes[:50]
             },
-            'presencas': {
-                'total':       total_presencas,
-                'presente':    presencas_present,
-                'ausente':     presencas_ausente,
-                'justificado': presencas_justif,
-                'pct_presenca': pct_presenca
-            }
+            'presencas': presencas  # já é um dict com total, presente, ausente, pct_presenca
         })
 
     return jsonify({'ano': ano, 'resultado': resultado})
