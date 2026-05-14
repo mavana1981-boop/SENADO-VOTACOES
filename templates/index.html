@@ -331,6 +331,9 @@
       const p   = res.presencas || {};
       const pct = p.pct_presenca || 0;
       const corPct = pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'danger';
+      const notaPresenca = p.total === 0
+        ? '<small class="text-muted">Dados de sessões não disponíveis para este ano</small>'
+        : '';
 
       html += `
       <div class="result-card">
@@ -365,14 +368,13 @@
             </div>
             <div class="col-6">
               <div class="stat-box">
-                <div class="stat-num">${p.total || 0}</div>
+                <div class="stat-num">${p.total || p.presente || 0}</div>
                 <div class="stat-label">Sessões no Plenário</div>
               </div>
               <div class="mt-2 px-3">
                 <div class="d-flex justify-content-between small mb-1">
                   <span>Presença: <strong>${p.presente || 0}</strong></span>
                   <span>Ausente: <strong>${p.ausente || 0}</strong></span>
-                  <span>Justif: <strong>${p.justificado || 0}</strong></span>
                 </div>
                 <div class="progress progress-thin">
                   <div class="progress-bar bg-${corPct}" style="width:${pct}%"></div>
@@ -380,6 +382,7 @@
                 <div class="text-center mt-1">
                   <span class="badge bg-${corPct}">${pct}% de presença</span>
                 </div>
+                ${notaPresenca}
               </div>
             </div>
           </div>
