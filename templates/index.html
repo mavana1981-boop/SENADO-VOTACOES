@@ -373,8 +373,13 @@
               </div>
               <div class="mt-2 px-3">
                 <div class="d-flex justify-content-between small mb-1">
-                  <span>Presença: <strong>${p.presente || 0}</strong></span>
+                  <span>Presente: <strong>${p.presente || 0}</strong></span>
                   <span>Ausente: <strong>${p.ausente || 0}</strong></span>
+                </div>
+                <div class="d-flex justify-content-between small mb-1 text-muted">
+                  <span>↳ Votações: ${p.sessoes_voto || 0}</span>
+                  <span>↳ Discursos: ${p.sessoes_disc || 0}</span>
+                  <span>↳ Sessões: ${p.sessoes_scrape || 0}</span>
                 </div>
                 <div class="progress progress-thin">
                   <div class="progress-bar bg-${corPct}" style="width:${pct}%"></div>
