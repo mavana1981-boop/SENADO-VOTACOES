@@ -105,56 +105,62 @@ def buscar_votacoes_senador(codigo_senador, ano=None):
         logger.error(f"Erro ao parsear votações de {codigo_senador}: {e}")
         return []
 
+def buscar_sessoes_do_ano(ano):
+    """Busca todas as sessões plenárias com votação nominal do ano via arquivo XML do Senado."""
+    sessoes = set()
+    try:
+        # Arquivo XML oficial de votações nominais por ano
+        url = f"https://legis.senado.leg.br/dadosabertos/dados/ListaVotacoes{ano}.xml"
+        r = requests.get(url, timeout=20)
+        if not r.ok:
+            logger.warning(f"Arquivo de votações {ano} não disponível: {r.status_code}")
+            return sessoes
+        root = ET.fromstring(r.content)
+        # Cada Votacao tem uma SessaoPlenaria com CodigoSessao
+        for votacao in root.iter('Votacao'):
+            sessao = votacao.find('SessaoPlenaria')
+            if sessao is not None:
+                cod = sessao.findtext('CodigoSessao') or sessao.findtext('NumeroSessao')
+                if cod:
+                    sessoes.add(cod.strip())
+        logger.info(f"Sessões únicas em {ano}: {len(sessoes)}")
+    except Exception as e:
+        logger.warning(f"Erro ao buscar sessões do ano {ano}: {e}")
+    return sessoes
+
 def buscar_presencas_senador(codigo_senador, ano=None):
     """
-    O Senado não tem endpoint de presença direta.
-    Usamos as votações nominais do ano para contar sessões em que o senador participou.
-    Também buscamos o total de sessões plenárias do ano para calcular ausências.
+    Calcula presença do senador cruzando:
+    - Sessões totais do ano (via XML de votações nominais)
+    - Sessões em que o senador votou (via API de votações do senador)
     """
-    # Busca votações do senador no ano para extrair sessões em que participou
-    votacoes = buscar_votacoes_senador(codigo_senador, ano)
+    votacoes  = buscar_votacoes_senador(codigo_senador, ano)
 
-    # Conta sessões únicas em que o senador votou (=presente)
-    sessoes_com_voto = set()
+    # Sessões em que o senador participou (votou em qualquer matéria)
+    sessoes_senador = set()
     for v in votacoes:
-        sessao_id = v.get('codigo_sessao') or v.get('numero_sessao') or v.get('data')
-        if sessao_id:
-            sessoes_com_voto.add(str(sessao_id))
+        cod = v.get('codigo_sessao') or v.get('numero_sessao')
+        if cod:
+            sessoes_senador.add(str(cod).strip())
 
-    # Busca total de sessões plenárias do ano via API de plenário
-    total_sessoes = 0
-    try:
-        if ano:
-            url = f"{BASE}/plenario/lista/votacao/{ano}.json"
-            data = get_json(url)
-            if data:
-                votacoes_ano = (data
-                    .get("ListaVotacoes", {})
-                    .get("Votacoes", {})
-                    .get("Votacao", []))
-                if isinstance(votacoes_ano, dict):
-                    votacoes_ano = [votacoes_ano]
-                # Conta sessões únicas do ano
-                sessoes_ano = set()
-                for v in votacoes_ano:
-                    s = v.get("SessaoPlenaria", {}) or {}
-                    sid = s.get("CodigoSessao") or s.get("NumeroSessao")
-                    if sid:
-                        sessoes_ano.add(str(sid))
-                total_sessoes = len(sessoes_ano)
-    except Exception as e:
-        logger.warning(f"Erro ao buscar total de sessões {ano}: {e}")
-        total_sessoes = 0
+    # Total de sessões com votação nominal no ano
+    if ano:
+        todas_sessoes = buscar_sessoes_do_ano(ano)
+    else:
+        todas_sessoes = set()
 
-    presente   = len(sessoes_com_voto)
-    ausente    = max(0, total_sessoes - presente)
+    total    = len(todas_sessoes) if todas_sessoes else len(sessoes_senador)
+    presente = len(sessoes_senador)
+    # Só calcula ausente se tiver o total real de sessões
+    ausente  = max(0, len(todas_sessoes) - presente) if todas_sessoes else 0
+    pct      = round(presente / total * 100, 1) if total > 0 else 0
 
     return {
-        'total':        total_sessoes,
+        'total':        total,
         'presente':     presente,
         'ausente':      ausente,
-        'justificado':  0,  # API não fornece esse dado separado
-        'pct_presenca': round(presente / total_sessoes * 100, 1) if total_sessoes > 0 else 0
+        'justificado':  0,
+        'pct_presenca': pct
     }
 
 # --------------------------------------------------------------------------
