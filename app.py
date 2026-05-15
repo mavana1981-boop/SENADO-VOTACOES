@@ -195,6 +195,61 @@ def calcular_presenca(codigo_senador, ano):
 # --------------------------------------------------------------------------
 # ROTAS
 # --------------------------------------------------------------------------
+@app.route('/diagnostico')
+def diagnostico():
+    """Testa conectividade com as fontes de dados do Senado."""
+    import xml.etree.ElementTree as ET
+    resultados = {}
+
+    urls = {
+        'xml_2025': f"{BASE}/dados/ListaVotacoes2025.xml",
+        'xml_2026': f"{BASE}/dados/ListaVotacoes2026.xml",
+        'senadores_xml': f"{BASE}/senador/lista/atual.xml",
+        'votacoes_json': f"{BASE}/plenario/lista/votacao/20250201/20250228.json",
+    }
+    for nome, url in urls.items():
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            ct = r.headers.get('Content-Type', '')
+            preview = r.text[:100] if r.text else ''
+            resultados[nome] = {
+                'status': r.status_code,
+                'ok': r.ok,
+                'content_type': ct,
+                'preview': preview,
+                'size': len(r.content)
+            }
+            # Se XML, tenta parsear e conta votações
+            if r.ok and 'xml' in ct.lower():
+                try:
+                    root = ET.fromstring(r.content)
+                    votacoes = list(root.iter('Votacao'))
+                    sessoes = set()
+                    for v in votacoes:
+                        s = v.find('SessaoPlenaria')
+                        if s is not None:
+                            c = s.findtext('CodigoSessao') or s.findtext('NumeroSessao') or ''
+                            if c: sessoes.add(c)
+                    resultados[nome]['votacoes'] = len(votacoes)
+                    resultados[nome]['sessoes_unicas'] = len(sessoes)
+                    # Mostra tags da primeira votação
+                    if votacoes:
+                        v0 = votacoes[0]
+                        resultados[nome]['tags_votacao'] = [c.tag for c in v0]
+                        sp = v0.find('SessaoPlenaria')
+                        if sp is not None:
+                            resultados[nome]['tags_sessao'] = [c.tag for c in sp]
+                        votos = list(v0.iter('VotoParlamentar'))
+                        resultados[nome]['votos_1a_votacao'] = len(votos)
+                        if votos:
+                            resultados[nome]['tags_voto'] = [c.tag for c in votos[0]]
+                except Exception as ex:
+                    resultados[nome]['parse_error'] = str(ex)
+        except Exception as e:
+            resultados[nome] = {'erro': str(e)}
+
+    return jsonify(resultados)
+
 @app.route('/')
 def index():
     ano_atual = datetime.now().year
