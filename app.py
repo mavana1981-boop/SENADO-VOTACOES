@@ -205,6 +205,42 @@ def calcular_presenca(codigo_senador, ano):
 # --------------------------------------------------------------------------
 # ROTAS
 # --------------------------------------------------------------------------
+@app.route('/debug_xml_raw/<int:ano>')
+def debug_xml_raw(ano):
+    """Mostra XML bruto da primeira votação para entender namespaces."""
+    import xml.etree.ElementTree as ET
+    try:
+        url = f"{BASE}/dados/ListaVotacoes{ano}.xml"
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        if not r.ok:
+            return jsonify({'erro': f'Status {r.status_code}'})
+        
+        # Pega primeiros 3000 chars do XML bruto para ver estrutura
+        texto = r.text[:5000]
+        
+        # Também tenta parsear e ver tags com namespace
+        root = ET.fromstring(r.content)
+        votacoes = list(root.iter('Votacao'))
+        resultado = {
+            'xml_bruto_inicio': texto,
+            'total_votacoes': len(votacoes),
+        }
+        if votacoes:
+            v0 = votacoes[0]
+            # Mostra todas as tags incluindo namespaces
+            todas_tags = []
+            for elem in v0.iter():
+                todas_tags.append({
+                    'tag': elem.tag,
+                    'text': elem.text[:50] if elem.text and elem.text.strip() else None,
+                    'n_filhos': len(list(elem))
+                })
+            resultado['todas_tags_v0'] = todas_tags[:30]
+        return jsonify(resultado)
+    except Exception as e:
+        import traceback
+        return jsonify({'erro': str(e), 'tb': traceback.format_exc()})
+
 @app.route('/debug_xml/<int:ano>')
 def debug_xml(ano):
     """Mostra exatamente o que o parser extrai do XML."""
