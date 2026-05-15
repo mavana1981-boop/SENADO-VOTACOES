@@ -75,24 +75,34 @@ def processar_dados_ano(ano):
     votos_por_senador   = {}
 
     # ---- FONTE 1: XML nominais ----
+    # Estrutura real (confirmada via /diagnostico):
+    # <Votacao>
+    #   <CodigoSessao>X</CodigoSessao>   <- direto na Votacao, SEM SessaoPlenaria
+    #   <Votos><Voto>
+    #     <CodigoParlamentar>Y</CodigoParlamentar>
+    #     <Voto>Sim</Voto>               <- tag <Voto> dentro de <Voto>
+    #   </Voto></Votos>
+    # </Votacao>
     try:
         url = f"{BASE}/dados/ListaVotacoes{ano}.xml"
         r = requests.get(url, headers=HEADERS, timeout=30)
         if r.ok:
             root = ET.fromstring(r.content)
             for votacao in root.iter('Votacao'):
-                s_el = votacao.find('SessaoPlenaria')
-                if s_el is None:
-                    continue
-                cod_s = (s_el.findtext('CodigoSessao') or
-                         s_el.findtext('NumeroSessao') or '').strip()
+                # CodigoSessao direto na Votacao (não em SessaoPlenaria)
+                cod_s = (votacao.findtext('CodigoSessao') or
+                         votacao.findtext('NumeroSessao') or '').strip()
                 if not cod_s:
                     continue
                 sessoes_nominais.add(cod_s)
                 sessoes_deliberacao.add(cod_s)
 
-                for v_el in votacao.iter('VotoParlamentar'):
-                    cod_p = (v_el.findtext('CodigoParlamentar') or '').strip()
+                # Votos em <Votos><Voto>
+                votos_el = votacao.find('Votos')
+                if votos_el is None:
+                    continue
+                for voto_el in votos_el.findall('Voto'):
+                    cod_p = (voto_el.findtext('CodigoParlamentar') or '').strip()
                     if not cod_p:
                         continue
                     if cod_p not in votos_por_senador:
@@ -101,7 +111,8 @@ def processar_dados_ano(ano):
                             'sim': 0, 'nao': 0, 'abs': 0, 'outros': 0
                         }
                     votos_por_senador[cod_p]['sessoes_nominal'].add(cod_s)
-                    v = (v_el.findtext('DescricaoVoto') or '').lower()
+                    # Valor do voto em <Voto> (tag homônima)
+                    v = (voto_el.findtext('Voto') or '').lower()
                     if 'sim' in v:
                         votos_por_senador[cod_p]['sim'] += 1
                     elif 'não' in v or 'nao' in v:
@@ -111,7 +122,8 @@ def processar_dados_ano(ano):
                     else:
                         votos_por_senador[cod_p]['outros'] += 1
 
-            logger.info(f"XML {ano}: {len(sessoes_nominais)} sessões nominais")
+            logger.info(f"XML {ano}: {len(sessoes_nominais)} sessões nominais, "
+                        f"{len(votos_por_senador)} senadores")
         else:
             logger.warning(f"XML {ano} status {r.status_code}")
     except Exception as e:
@@ -149,9 +161,10 @@ def processar_dados_ano(ano):
             if isinstance(vots, dict):
                 vots = [vots]
             for v in vots:
-                s = v.get("SessaoPlenaria", {}) or {}
-                cod_s = (s.get("CodigoSessao") or s.get("NumeroSessao") or '').strip()
-                if cod_s:
+                # CodigoSessao direto no dict (mesma estrutura do XML)
+                cod_s = (str(v.get("CodigoSessao", '') or '')
+                         or str(v.get("NumeroSessao", '') or '')).strip()
+                if cod_s and cod_s != '0' and cod_s != 'None':
                     sessoes_deliberacao.add(cod_s)
         except Exception as e:
             logger.warning(f"Erro FONTE 2 {mes}/{ano}: {e}")
