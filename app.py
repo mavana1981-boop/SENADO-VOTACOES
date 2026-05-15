@@ -208,6 +208,68 @@ def calcular_presenca(codigo_senador, ano):
 # --------------------------------------------------------------------------
 # ROTAS
 # --------------------------------------------------------------------------
+@app.route('/debug_xml/<int:ano>')
+def debug_xml(ano):
+    """Mostra exatamente o que o parser extrai do XML."""
+    import xml.etree.ElementTree as ET
+    resultado = {}
+    try:
+        url = f"{BASE}/dados/ListaVotacoes{ano}.xml"
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        resultado['status'] = r.status_code
+        resultado['ok'] = r.ok
+        if r.ok:
+            root = ET.fromstring(r.content)
+            # Pega a primeira Votacao e mostra tudo
+            votacoes = list(root.iter('Votacao'))
+            resultado['total_votacoes'] = len(votacoes)
+            if votacoes:
+                v0 = votacoes[0]
+                # Mostra todos os filhos diretos
+                resultado['filhos_diretos'] = {c.tag: c.text for c in v0}
+                # Tenta extrair CodigoSessao
+                resultado['CodigoSessao_direto'] = v0.findtext('CodigoSessao')
+                resultado['NumeroSessao_direto'] = v0.findtext('NumeroSessao')
+                # Mostra Votos
+                votos_el = v0.find('Votos')
+                if votos_el is not None:
+                    voto_list = votos_el.findall('Voto')
+                    resultado['total_votos_1a'] = len(voto_list)
+                    if voto_list:
+                        v1 = voto_list[0]
+                        resultado['voto_filhos'] = {c.tag: c.text for c in v1}
+                        resultado['CodigoParlamentar'] = v1.findtext('CodigoParlamentar')
+                        resultado['Voto_valor'] = v1.findtext('Voto')
+                else:
+                    resultado['Votos_el'] = 'None — não encontrou <Votos>'
+                    # Tenta outros caminhos
+                    resultado['iter_Voto'] = len(list(v0.iter('Voto')))
+                    if list(v0.iter('Voto')):
+                        voto_iter = list(v0.iter('Voto'))[0]
+                        resultado['voto_iter_filhos'] = {c.tag: c.text for c in voto_iter}
+
+            # Testa parser completo rápido (só primeiras 5 votações)
+            sessoes = set()
+            senadores = set()
+            for i, votacao in enumerate(votacoes[:5]):
+                cod_s = (votacao.findtext('CodigoSessao') or
+                         votacao.findtext('NumeroSessao') or '').strip()
+                if cod_s:
+                    sessoes.add(cod_s)
+                votos_el = votacao.find('Votos')
+                if votos_el:
+                    for voto_el in votos_el.findall('Voto'):
+                        cod_p = (voto_el.findtext('CodigoParlamentar') or '').strip()
+                        if cod_p:
+                            senadores.add(cod_p)
+            resultado['sessoes_primeiras_5'] = list(sessoes)
+            resultado['senadores_primeiras_5'] = list(senadores)[:5]
+    except Exception as e:
+        resultado['erro'] = str(e)
+        import traceback
+        resultado['traceback'] = traceback.format_exc()
+    return jsonify(resultado)
+
 @app.route('/diagnostico')
 def diagnostico():
     """Testa conectividade com as fontes de dados do Senado."""
