@@ -97,9 +97,11 @@ def processar_dados_ano(ano):
                 sessoes_nominais.add(cod_s)
                 sessoes_deliberacao.add(cod_s)
 
-                # Votos: <Votos> retorna null no findtext mas iter('Voto') funciona
-                for voto_el in votacao.iter('Voto'):
-                    # Evita pegar a tag <Votacao> pai se existir
+                # Estrutura confirmada: <Votos><VotoParlamentar><Voto>Sim</Voto>
+                votos_el = votacao.find('Votos')
+                if votos_el is None:
+                    continue
+                for voto_el in votos_el.findall('VotoParlamentar'):
                     cod_p = (voto_el.findtext('CodigoParlamentar') or '').strip()
                     if not cod_p:
                         continue
@@ -110,13 +112,14 @@ def processar_dados_ano(ano):
                         }
                     votos_por_senador[cod_p]['sessoes_nominal'].add(cod_s)
                     v = (voto_el.findtext('Voto') or '').lower()
-                    if 'sim' in v:
+                    if v == 'sim':
                         votos_por_senador[cod_p]['sim'] += 1
-                    elif 'não' in v or 'nao' in v:
+                    elif v == 'não' or v == 'nao':
                         votos_por_senador[cod_p]['nao'] += 1
-                    elif 'abs' in v:
+                    elif v in ('abstenção', 'abstencao', 'abs'):
                         votos_por_senador[cod_p]['abs'] += 1
                     else:
+                        # AP = Atividade Parlamentar, P = Presidente, etc.
                         votos_por_senador[cod_p]['outros'] += 1
 
             logger.info(f"XML {ano}: {len(sessoes_nominais)} sessões nominais, "
@@ -265,11 +268,16 @@ def debug_xml(ano):
                 resultado['NumeroSessao_direto'] = v0.findtext('NumeroSessao')
                 # Mostra Votos
                 resultado['iter_Voto_total'] = len(list(v0.iter('Voto')))
-                if list(v0.iter('Voto')):
-                    v1 = list(v0.iter('Voto'))[0]
-                    resultado['voto_iter_filhos'] = {c.tag: c.text for c in v1}
-                    resultado['CodigoParlamentar'] = v1.findtext('CodigoParlamentar')
-                    resultado['Voto_valor'] = v1.findtext('Voto')
+                votos_el = v0.find('Votos')
+                resultado['Votos_el_found'] = votos_el is not None
+                if votos_el is not None:
+                    vp_list = votos_el.findall('VotoParlamentar')
+                    resultado['total_VotoParlamentar'] = len(vp_list)
+                    if vp_list:
+                        vp0 = vp_list[0]
+                        resultado['voto_filhos'] = {c.tag: c.text for c in vp0}
+                        resultado['CodigoParlamentar'] = vp0.findtext('CodigoParlamentar')
+                        resultado['Voto_valor'] = vp0.findtext('Voto')
 
             # Testa parser completo rápido (só primeiras 5 votações)
             sessoes = set()
@@ -280,8 +288,8 @@ def debug_xml(ano):
                 if cod_s:
                     sessoes.add(cod_s)
                 votos_el = votacao.find('Votos')
-                if votos_el:
-                    for voto_el in votos_el.findall('Voto'):
+                if votos_el is not None:
+                    for voto_el in votos_el.findall('VotoParlamentar'):
                         cod_p = (voto_el.findtext('CodigoParlamentar') or '').strip()
                         if cod_p:
                             senadores.add(cod_p)
